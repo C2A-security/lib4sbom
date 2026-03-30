@@ -131,14 +131,27 @@ class SBOMPackage:
 
     def set_property(self, name, value):
         # Allow multiple entries
-        property_entry = [name.strip(), value]
-        if "property" in self.package:
-            self.package["property"].append(property_entry)
-        else:
-            self.package["property"] = [property_entry]
+        if value is not None:
+            property_entry = [name.strip(), value]
+            if "property" in self.package:
+                self.package["property"].append(property_entry)
+            else:
+                self.package["property"] = [property_entry]
 
-    def set_licenseconcluded(self, license):
+    def set_tag(self, name):
+        # Allow multiple entries
+        if name is not None:
+            tag_entry = name.strip()
+            if "tag" in self.package:
+                self.package["tag"].append(tag_entry)
+            else:
+                self.package["tag"] = [tag_entry]
+
+    def set_licenseconcluded(self, license, name=None):
         self.package["licenseconcluded"] = license
+        if name is not None:
+            # Use name if not SPDX license. license is then assumed to be the license text
+            self.package["licensename"] = name
 
     def set_licensedeclared(self, license, name=None):
         self.package["licensedeclared"] = license
@@ -256,18 +269,8 @@ class SBOMPackage:
 
     def set_cpe(self, vector, cpetype="cpe23Type"):
         if cpetype in ["cpe22Type", "cpe23Type"]:
-            # Validate vector
-            elements = vector.replace("\\:", "$").split(":")
-            if cpetype == "cpe23Type":
-                supplier = self._escape(elements[3].replace(" ", "_").lower())
-                package = self._escape(elements[4])
-                version = self._escape(elements[5])
-                new_vector = f"cpe:2.3:a:{supplier}:{package}:{version}:*:*:*:*:*:*:*"
-            else:
-                supplier = self._escape(elements[2].replace(" ", "_").lower())
-                package = self._escape(elements[3])
-                version = self._escape(elements[4])
-                new_vector = f"cpe:{elements[1]}:{supplier}:{package}:{version}"
+            # Temporarily remove _escape usage as it's incomplete (e.g., it incorrectly escapes '*').
+            new_vector = vector.replace(" ", "_").lower()
             self.set_externalreference("SECURITY", cpetype, new_vector)
 
     def set_purl(self, purl_value):
