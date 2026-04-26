@@ -47,6 +47,7 @@ class SPDX3Generator:
         self.include_purl = False
         self.debug = os.getenv("LIB4SBOM_DEBUG") is not None
         self.organisation = None
+        self.organisation_id = None
         self.tool = None
         self.spdx_version = self.SPDX_VERSION
         self.license_info = []
@@ -110,8 +111,8 @@ class SPDX3Generator:
         creation["@id"] = f"_:creationinfo{self.creationid}"
         creation["created"] = self.document_generation_time
         # Meeds to reference organisation element
-        if self.organisation is not None:
-            creation["createdBy"] = [self.organisation]
+        if self.organisation_id is not None:
+            creation["createdBy"] = [self.organisation_id]
         else:
             # Need to create an agent
             creation["createdBy"] = [
@@ -137,7 +138,13 @@ class SPDX3Generator:
             "name": project_name,
             "dataLicense": data_licence_id,
             "rootElement": [bom_id],
-            "profileConformance": ["core", "software", "security", "simpleLicensing"],
+            "profileConformance": [
+                "core",
+                "software",
+                "security",
+                "simpleLicensing",
+                "expandedLicensing",
+            ],
         }
         self.create_type("SpdxDocument", document_properties)
 
@@ -198,20 +205,31 @@ class SPDX3Generator:
             supplier = component_details["supplier"].split(":")
             # Extract details of the supplier. Assume format is name (email address)
             pattern = r"^(.*?)(?:\s*\((.*?)\))?\s*$"
-            match = re.search(pattern, supplier[1])
-            if match:
-                name = match.group(1).strip()
-                email = match.group(2)
-                supplier_info = {"name": name}
-                if email is not None:
-                    ext_id = {
-                        "type": "ExternalIdentifier",
-                        "identifier": email.strip(),
-                        "externalIdentifierType": "email",
-                    }
-                    supplier_info["externalIdentifier"] = [ext_id]
-                supplier_id = self.create_type(supplier[0].capitalize(), supplier_info)
-                package_details["suppliedBy"] = supplier_id
+            if len(supplier) > 1:
+                supplier_type = supplier[0].capitalize()
+                # Capture all data after supplier type
+                supplier_name = (
+                    component_details["supplier"][len(supplier_type) + 1 :]
+                    .strip()
+                    .rstrip("\n")
+                )
+                match = re.search(pattern, supplier_name)
+                if match:
+                    name = match.group(1).strip()
+                    email = match.group(2)
+                    supplier_info = {"name": name}
+                    if email is not None:
+                        ext_id = {
+                            "type": "ExternalIdentifier",
+                            "identifier": email.strip(),
+                            "externalIdentifierType": "email",
+                        }
+                        supplier_info["externalIdentifier"] = [ext_id]
+                    supplier_id = self.create_type(supplier_type, supplier_info)
+            else:
+                # NOASSERTION
+                supplier_id = self.create_type("Agent", {"name": supplier[0]})
+            package_details["suppliedBy"] = supplier_id
         if "checksums" in component_details:
             for checksum in component_details["checksums"]:
                 checksum_entry = dict()
@@ -250,17 +268,63 @@ class SPDX3Generator:
             if key in component_details.keys():
                 license_details = {}
                 license_details["relationshipType"] = license_attributes[key]
-                licence_id = self.license.find_license_id(component_details[key])
-                licence_url = self.license.get_license_url(licence_id)
-                if licence_url is not None:
-                    # create a license object and reference it
-                    licence_ref = self.create_type(
-                        "simplelicensing_LicenseExpression",
-                        {
+                # Detect if a valid SPDX license. Licence expressions are ignored
+                licence_url = None
+                if not self.license.license_expression(component_details[key]):
+                    if self.license.license_exception(component_details[key]):
+                        licence_type = "expandedlicensing_ListedLicense"
+                        licence_type_data = {
+                            "simplelicensing_licenseText": self.license.get_license_from_exception(
+                                component_details[key]
+                            ),
+                        }
+                        licence_url_ref = self.create_type(
+                            licence_type, licence_type_data
+                        )
+                        exception_id = self.license.get_exception(
+                            component_details[key]
+                        )
+                        licence_type = "expandedlicensing_ListedLicenseException"
+                        licence_type_data = {
+                            "expandedlicensing_additionText": exception_id
+                        }
+                        licence_exception_url_ref = self.create_type(
+                            licence_type, licence_type_data
+                        )
+                        licence_type = "expandedlicensing_WithAdditionOperator"
+                        licence_type_data = {
+                            "expandedlicensing_subjectExtendableLicense": licence_url_ref,
+                            "expandedlicensing_subjectAddition": licence_exception_url_ref,
+                        }
+                        licence_url = True
+                    elif self.license.orlater(component_details[key]):
+                        licence_type = "expandedlicensing_ListedLicense"
+                        # Need to remove the '+' from the license identifier
+                        licence_type_data = {
+                            "simplelicensing_licenseText": self.license.find_license_id(
+                                component_details[key]
+                            )[:-1],
+                        }
+                        licence_url_ref = self.create_type(
+                            licence_type, licence_type_data
+                        )
+                        licence_type = "expandedlicensing_OrLaterOperator"
+                        licence_type_data = {
+                            "expandedlicensing_subjectLicense": licence_url_ref,
+                        }
+                        licence_url = True
+                    else:
+                        licence_id = self.license.find_license_id(
+                            component_details[key]
+                        )
+                        licence_url = self.license.get_license_url(licence_id)
+                        licence_type = "simplelicensing_LicenseExpression"
+                        licence_type_data = {
                             "simplelicensing_licenseExpression": component_details[key],
                             "simplelicensing_licenseListVersion": self.license_list_id,
-                        },
-                    )
+                        }
+                if licence_url is not None:
+                    licence_ref = self.create_type(licence_type, licence_type_data)
                     license_details["to"] = [licence_ref]
                 else:
                     license_details["to"] = [
@@ -298,10 +362,6 @@ class SPDX3Generator:
     def generateDocumentHeader(
         self, project_name, uuid=None, lifecycle=None, organisation=None
     ):
-        if organisation is not None:
-            self.organisation = organisation
-            if len(self.organisation) == 0:
-                self.organisation = None
         # Assume a new document being created
         self.doc = {}
         self.component = []
@@ -311,11 +371,15 @@ class SPDX3Generator:
         self.tool = self.create_type(
             "Tool", {"name": f"{self.application}-{self.application_version}"}
         )
+        if organisation is not None:
+            self.organisation = organisation.strip()
+            if len(self.organisation) == 0:
+                self.organisation = None
+            else:
+                self.organisation_id = self.create_type(
+                    "Organization", {"name": self.organisation}
+                )
         self.creation_info()
-        if self.organisation is not None:
-            self.organisation = self.create_type(
-                "Organization", {"name": self.organisation}
-            )
         self.bom_id = None
         self.lifecycle = lifecycle if lifecycle is not None else "build"
         self.project_name = project_name
@@ -534,7 +598,13 @@ class SPDX3Generator:
                             ref_value = purl_validator.fix()
                     reference_data = dict()
                     reference_data["referenceCategory"] = reference[0].replace("_", "-")
-                    reference_data["referenceType"] = reference[1]
+                    ref_type = reference[1]
+                    # SPDX requires referenceType to be a full IRI when the
+                    # category is OTHER. CycloneDX types like "issue-tracker"
+                    # arrive as bare tokens; wrap so RDF serializers accept.
+                    if reference_data["referenceCategory"] == "OTHER" and ref_type and "://" not in ref_type:
+                        ref_type = "http://spdx.org/spdxdocs/external-references#" + ref_type
+                    reference_data["referenceType"] = ref_type
                     reference_data["referenceLocator"] = ref_value
                     if "externalRefs" in component:
                         component["externalRefs"].append(reference_data)
@@ -591,16 +661,14 @@ class SPDX3Generator:
         self.create_file(component)
 
     def generateJSONLicenseDetails(self, id, name, license_text, comment):
-        extractedlicense = {}
-        if len(id) > 0:
-            extractedlicense["licenseId"] = id
-        if len(name) > 0:
-            extractedlicense["name"] = name
-        if len(license_text) > 0:
-            extractedlicense["extractedText"] = license_text
-        if len(comment) > 0:
-            extractedlicense["comment"] = comment
-        self.licenses.append(extractedlicense)
+        self.create_type(
+            "expandedlicensing_CustomLicense",
+            {
+                "simplelicensing_licenseText": license_text,
+                "name": id,
+                "comment": comment,
+            },
+        )
 
     def generatePackageDetails(
         self, package, id, package_info, parent_id, relationship

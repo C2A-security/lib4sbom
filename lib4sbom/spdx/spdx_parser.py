@@ -27,6 +27,7 @@ class SPDXParser:
         self.services = []
         self.user_licences = []
         self.license_scanner = LicenseScanner()
+        self.debug = False
 
     def parse(self, sbom_string: str, parser_type: ParserType = None):
         """parses SPDX SBOM string"""
@@ -254,7 +255,8 @@ class SPDXParser:
                     # Save package metadata
                     package_tuple = (package, version, spdx_id)
                     if package_tuple in packages:
-                        print(f"Duplicate package detected {package} {version}")
+                        if self.debug:
+                            print(f"Duplicate package detected {package} {version}")
                     else:
                         packages[package_tuple] = spdx_package.get_package()
                     version = DEFAULT_VERSION
@@ -282,7 +284,12 @@ class SPDXParser:
             elif line_elements[0] == "PackageSupplier":
                 if len(line_elements) == 3:
                     supplier_type = line_elements[1]
-                    supplier = line_elements[2].strip().rstrip("\n")
+                    # Capture all data after supplier type
+                    supplier = (
+                        line[line.find(supplier_type) + len(supplier_type) + 1 :]
+                        .strip()
+                        .rstrip("\n")
+                    )
                 else:
                     # No type specified
                     supplier_type = "UNKNOWN"
@@ -406,7 +413,8 @@ class SPDXParser:
             # Save package metadata
             package_tuple = (package, version, spdx_id)
             if package_tuple in packages:
-                print(f"Duplicate package detected {package} {version}")
+                if self.debug:
+                    print(f"Duplicate package detected {package} {version}")
             else:
                 packages[package_tuple] = spdx_package.get_package()
         if spdx_licenses.get_id() is not None:
@@ -519,11 +527,17 @@ class SPDXParser:
                         if version is not None:
                             spdx_package.set_version(version)
                         if "supplier" in d:
+                            # Format is <supplier type>: <data> or NOASSERTION
                             supplier = d["supplier"].split(":")
-                            # Type not always specified
-                            if len(supplier) == 2:
+                            # Check if type specified
+                            if len(supplier) > 1:
                                 supplier_type = supplier[0]
-                                supplier_name = supplier[1].strip().rstrip("\n")
+                                # Capture all data after supplier type
+                                supplier_name = (
+                                    d["supplier"][len(supplier_type) + 1 :]
+                                    .strip()
+                                    .rstrip("\n")
+                                )
                             else:
                                 # No type specified
                                 supplier_type = "UNKNOWN"
@@ -605,7 +619,8 @@ class SPDXParser:
                                 )
                         package_tuple = (package, version, id)
                         if package_tuple in packages:
-                            print(f"Duplicate package detected {package} {version}")
+                            if self.debug:
+                                print(f"Duplicate package detected {package} {version}")
                         else:
                             packages[package_tuple] = spdx_package.get_package()
                     except KeyError as e:
@@ -787,7 +802,22 @@ class SPDXParser:
                     licence_list_version = element.get(
                         "simplelicensing_licenseListVersion"
                     )
-
+            elif element_type == "expandedlicensing_ListedLicense":
+                licence_expression[element_id] = element.get(
+                    "simplelicensing_licenseText"
+                )
+            elif element_type == "expandedlicensing_ListedLicenseException":
+                licence_expression[element_id] = element.get(
+                    "expandedlicensing_additionText"
+                )
+            elif element_type == "expandedlicensing_WithAdditionOperator":
+                licence_expression[element_id] = (
+                    f'{licence_expression[element.get("expandedlicensing_subjectExtendableLicense")]} WITH {licence_expression[element.get("expandedlicensing_subjectAddition")]}'
+                )
+            elif element_type == "expandedlicensing_OrLaterOperator":
+                licence_expression[element_id] = (
+                    f'{licence_expression[element.get("expandedlicensing_subjectLicense")]}+'
+                )
         # Look for metadata
         # Should alays have softwareSbom element, but just in case...
         if doc_id is not None:
@@ -962,7 +992,8 @@ class SPDXParser:
                 if spdx_package.get_name() is not None:
                     package_tuple = (name, version, id)
                     if package_tuple in packages:
-                        print(f"Duplicate package detected {name} {version}")
+                        if self.debug:
+                            print(f"Duplicate package detected {name} {version}")
                     else:
                         packages[package_tuple] = spdx_package.get_package()
         return (
