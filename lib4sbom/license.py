@@ -18,6 +18,13 @@ class LicenseScanner:
         if self._check_file(license_path):
             licfile = open(license_path, "r", encoding="utf-8")
             self.licenses = json.load(licfile)
+        self.exceptions = {}
+        exception_path = os.path.join(
+            license_dir, "license_data", "spdx_exceptions.json"
+        )
+        if self._check_file(exception_path):
+            exception_file = open(exception_path, "r", encoding="utf-8")
+            self.exceptions = json.load(exception_file)
         # Set up list of license synonyms
         synonym_file = os.path.join(license_dir, "license_data", "license_synonyms.txt")
         self.license_synonym = {}
@@ -81,15 +88,35 @@ class LicenseScanner:
         # Deprecated license ids are still valid
         if self.deprecated(license):
             return license
+        if self.license_exception(license):
+            # Check valid exception included
+            return self.exception_processing(license)
+        return self._validate_license(license)
+
+    def _handle_later(self, license):
+        # Some licences have + appended to indicate 'or-later':
+        return license[:-1] if license[-1] == "+" else license
+
+    def orlater(self, license):
+        return self._handle_later(license) != license
+
+    def _validate_license(self, license):
+        license_id = self.check_synonym(license)
+        if license_id is None:
+            license_id = license
+        if self.orlater(license):
+            license_id = self._handle_later(license)
+        extra = "+" if self.orlater(license) else ""
         for lic in self.get_license_list():
             # Comparisons ignore case of provided license text
-            if lic["licenseId"].lower() == license.lower():
-                return lic["licenseId"]
-            elif lic["name"].lower() == license.lower():
-                return lic["licenseId"]
+            if lic["licenseId"].lower() == license_id.lower():
+                return f'{lic["licenseId"]}{extra}'
+            elif lic["name"].lower() == license_id.lower():
+                return f'{lic["licenseId"]}{extra}'
         return self.DEFAULT_LICENSE
 
     def get_license_text(self, license_id):
+        license_id = self._handle_later(license_id)
         license_text = ""
         filename = f"{self.license_text_path}/{license_id.lower()}.html"
         # check filename exists
@@ -102,6 +129,7 @@ class LicenseScanner:
     def get_license_name(self, license_id):
         # Assume that license_id is a valid SPDX id
         if license_id != self.DEFAULT_LICENSE:
+            license_id = self._handle_later(license_id)
             for lic in self.get_license_list():
                 if lic["licenseId"] == license_id:
                     return lic["name"]
@@ -109,6 +137,10 @@ class LicenseScanner:
 
     def get_license_url(self, license_id):
         # Assume that license_id is a valid SPDX id
+        if self.license_exception(license_id):
+            # Extract license
+            license_id = license_id.split(" ")[0]
+        license_id = self._handle_later(license_id)
         if license_id != self.DEFAULT_LICENSE:
             for lic in self.get_license_list():
                 # License URL is in the seeAlso field.
@@ -120,6 +152,7 @@ class LicenseScanner:
     def osi_approved(self, license_id):
         # Assume that license_id is a valid SPDX id
         if license_id != self.DEFAULT_LICENSE:
+            license_id = self._handle_later(license_id)
             for lic in self.get_license_list():
                 if lic["licenseId"] == license_id:
                     return lic["isOsiApproved"]
@@ -128,6 +161,7 @@ class LicenseScanner:
     def deprecated(self, license_id):
         # Assume that license_id is a valid SPDX id
         if license_id != self.DEFAULT_LICENSE:
+            license_id = self._handle_later(license_id)
             for lic in self.get_license_list():
                 if lic["licenseId"] == license_id and lic["isDeprecatedLicenseId"]:
                     return True
@@ -205,11 +239,72 @@ class LicenseScanner:
         # Determine if license expression contains multiple elements
         return len(self._expression_split(expression)) > 1
 
+    def _update_exception(self, license):
+        return license.replace(" with ", " WITH ").replace(" With ", " WITH ")
+
+    def license_exception(self, license):
+        return " WITH " in self._update_exception(license)
+
+    def _validate_exception(self, exception_id):
+        for exception in self.exceptions.get("exceptions", []):
+            # Comparisons ignore case of provided exception text
+            if exception["licenseExceptionId"].lower() == exception_id.lower():
+                return exception["licenseExceptionId"]
+            elif exception["name"].lower() == exception_id.lower():
+                return exception["licenseExceptionId"]
+        return None
+
+    def get_license_from_exception(self, license):
+        if self.license_exception(license):
+            updated_license = self._update_exception(license)
+            license_id = self._validate_license(updated_license.split(" WITH ")[0])
+            if license_id != self.DEFAULT_LICENSE:
+                return license_id
+        return None
+
+    def exception_processing(self, license):
+        if self.license_exception(license):
+            # Assume format is <licence> WITH <exception>
+            # Check license and then exception
+            updated_license = self._update_exception(license)
+            valid_license = self._validate_license(updated_license.split(" WITH ")[0])
+            if valid_license == self.DEFAULT_LICENSE:
+                return valid_license
+            # There is a valid license, so now check exception
+            exception_id = updated_license.split(" WITH ")[1]
+            valid_exception = self._validate_exception(exception_id)
+            if valid_exception is not None:
+                return f"{valid_license} WITH {valid_exception}"
+            return self.DEFAULT_LICENSE
+        return None
+
+    def get_exception(self, license_with_exception):
+        if self.license_exception(license_with_exception):
+            return self._validate_exception(
+                self._update_exception(license_with_exception).split(" WITH ")[1]
+            )
+        return None
+
+    def get_exception_text(self, exception_id):
+        if self._validate_exception(exception_id):
+            return self.get_license_text(exception_id)
+        return ""
+
+    def get_exception_url(self, exception_id):
+        # Assume that exception_id is a valid id
+        for exception in self.exceptions.get("exceptions", []):
+            # Comparisons ignore case of provided exception text
+            if exception["licenseExceptionId"] == exception_id:
+                return exception["seeAlso"][0]
+        return None
+
     def get_license_type(self, license):
         # Default is UNKNOWN
-        license_id = self.check_synonym(license)
-        if license_id is None:
-            license_id = license
+        license_id = self.find_license_id(license)
+        license_id = self._handle_later(license_id)
+        if self.license_exception(license):
+            # Extract licence component is exception detected
+            license_id = self._validate_license(license.split(" ")[0])
         return self.license_type.get(license_id.upper(), "unknown").upper()
 
     def get_license_category(self, license_list):
@@ -245,4 +340,7 @@ class LicenseScanner:
         return False
 
     def expression_license_list(self, expression):
-        return self._expression_split(expression)
+        license_list = []
+        for lic in self._expression_split(expression):
+            license_list.append(self.find_license(lic))
+        return license_list
