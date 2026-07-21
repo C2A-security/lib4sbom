@@ -16,6 +16,25 @@ class SPDXGenerator:
     """
 
     SPDX_VERSION = "SPDX-2.3"
+    # Valid values for primaryPackagePurpose, a field that exists only from
+    # SPDX 2.3. Values are the JSON-schema spellings; the tag format uses
+    # hyphens instead of underscores. Source types outside this list (e.g.
+    # CycloneDX device-driver, platform, data) have no SPDX equivalent and
+    # are mapped to OTHER.
+    PACKAGE_PURPOSES = [
+        "APPLICATION",
+        "FRAMEWORK",
+        "LIBRARY",
+        "CONTAINER",
+        "OPERATING_SYSTEM",
+        "DEVICE",
+        "FIRMWARE",
+        "SOURCE",
+        "ARCHIVE",
+        "FILE",
+        "INSTALL",
+        "OTHER",
+    ]
     DATA_LICENSE = "CC0-1.0"
     SPDX_NAMESPACE = "http://spdx.org/spdxdocs/"
     SPDX_PREAMBLE = "SPDXRef-"
@@ -97,6 +116,12 @@ class SPDXGenerator:
             self.spdx_version = version
         else:
             self.spdx_version = None
+
+    def package_purpose(self, package_info):
+        purpose = package_info.get("type", "LIBRARY").upper().replace("-", "_")
+        if purpose not in self.PACKAGE_PURPOSES:
+            purpose = "OTHER"
+        return purpose
 
     def _uuid(self, id=None):
         if id is None:
@@ -292,13 +317,13 @@ class SPDXGenerator:
             self.generateTag("PackageVersion", version)
         elif self.debug:
             print(f"[WARNING] **** version missing for {package}")
-        if "type" in package_info:
-            # Handle SPDX mismatch of - and _ in OPERATING-SYSTEM
+        if self.spdx_version != "SPDX-2.2":
+            # PrimaryPackagePurpose was introduced in SPDX 2.3.
+            # Tag format uses - rather than _ (e.g. OPERATING-SYSTEM).
             self.generateTag(
-                "PrimaryPackagePurpose", package_info["type"].upper().replace("_", "-")
+                "PrimaryPackagePurpose",
+                self.package_purpose(package_info).replace("_", "-"),
             )
-        else:
-            self.generateTag("PrimaryPackagePurpose", "LIBRARY")
         if "supplier" in package_info:
             if package_info["supplier_type"] != "UNKNOWN":
                 self.generateTag(
@@ -370,6 +395,7 @@ class SPDXGenerator:
                     "PackageLicenseConcluded",
                     self.license_ident(package_info["licenseconcluded"]),
                 )
+        licenses_from_list = False
         if "licenselist" in package_info:
             # Handle multiple licenses from a CycloneDX SBOM
             license_expression = ""
@@ -384,6 +410,13 @@ class SPDXGenerator:
             if license_expression:
                 self.generateTag("PackageLicenseDeclared", license_expression)
                 self.generateTag("PackageLicenseConcluded", license_expression)
+                licenses_from_list = True
+        if self.spdx_version == "SPDX-2.2":
+            # Mandatory in SPDX 2.2 (optional since 2.3)
+            if "licensedeclared" not in package_info and not licenses_from_list:
+                self.generateTag("PackageLicenseDeclared", "NOASSERTION")
+            if "licenseconcluded" not in package_info and not licenses_from_list:
+                self.generateTag("PackageLicenseConcluded", "NOASSERTION")
         if "licensecomments" in package_info:
             self.generateTag(
                 "PackageLicenseComments",
@@ -415,12 +448,14 @@ class SPDXGenerator:
             # Potentially multiple entries
             for attribution in package_info["attribution"]:
                 self.generateTag("PackageAttributionText", self._text(attribution))
-        if "release_date" in package_info:
-            self.generateTag("ReleaseDate", package_info["release_date"])
-        if "build_date" in package_info:
-            self.generateTag("BuiltDate", package_info["build_date"])
-        if "validUntilDate" in package_info:
-            self.generateTag("ValidUntilDate", package_info["validUntilDate"])
+        if self.spdx_version != "SPDX-2.2":
+            # Date fields were introduced in SPDX 2.3
+            if "release_date" in package_info:
+                self.generateTag("ReleaseDate", package_info["release_date"])
+            if "build_date" in package_info:
+                self.generateTag("BuiltDate", package_info["build_date"])
+            if "validUntilDate" in package_info:
+                self.generateTag("ValidUntilDate", package_info["validUntilDate"])
         if "externalreference" in package_info:
             # Potentially multiple entries
             for reference in package_info["externalreference"]:
@@ -458,12 +493,9 @@ class SPDXGenerator:
             component["versionInfo"] = version
         elif self.debug:
             print(f"[WARNING] **** version missing for {package}")
-        if "type" in package_info:
-            component["primaryPackagePurpose"] = (
-                package_info["type"].upper().replace("-", "_")
-            )
-        else:
-            component["primaryPackagePurpose"] = "LIBRARY"
+        if self.spdx_version != "SPDX-2.2":
+            # primaryPackagePurpose was introduced in SPDX 2.3
+            component["primaryPackagePurpose"] = self.package_purpose(package_info)
         if "supplier" in package_info:
             if package_info["supplier_type"] != "UNKNOWN":
                 component["supplier"] = (
@@ -575,18 +607,20 @@ class SPDXGenerator:
                     component["attribution"].append(attribution_data)
                 else:
                     component["attribution"] = [attribution_data]
-        if "release_date" in package_info:
-            if (
-                package_info["release_date"] is not None
-                and len(package_info["release_date"]) > 0
-            ):
-                component["releaseDate"] = package_info["release_date"]
-        if "build_date" in package_info:
-            if len(package_info["build_date"]) > 0:
-                component["builtDate"] = package_info["build_date"]
-        if "validUntilDate" in package_info:
-            if len(package_info["validUntilDate"]) > 0:
-                component["validUntilDate"] = package_info["validUntilDate"]
+        if self.spdx_version != "SPDX-2.2":
+            # Date fields were introduced in SPDX 2.3
+            if "release_date" in package_info:
+                if (
+                    package_info["release_date"] is not None
+                    and len(package_info["release_date"]) > 0
+                ):
+                    component["releaseDate"] = package_info["release_date"]
+            if "build_date" in package_info:
+                if len(package_info["build_date"]) > 0:
+                    component["builtDate"] = package_info["build_date"]
+            if "validUntilDate" in package_info:
+                if len(package_info["validUntilDate"]) > 0:
+                    component["validUntilDate"] = package_info["validUntilDate"]
         if "externalreference" in package_info:
             # Potentially multiple entries
             for reference in package_info["externalreference"]:
@@ -611,6 +645,11 @@ class SPDXGenerator:
                         component["externalRefs"].append(reference_data)
                     else:
                         component["externalRefs"] = [reference_data]
+        if self.spdx_version == "SPDX-2.2":
+            # Mandatory in SPDX 2.2 (optional since 2.3). downloadLocation and
+            # copyrightText are also mandatory but always set above.
+            component.setdefault("licenseConcluded", "NOASSERTION")
+            component.setdefault("licenseDeclared", "NOASSERTION")
         self.component.append(component)
 
     def generateTagFileDetails(self, file, id, file_info, parent_id, relationship):
