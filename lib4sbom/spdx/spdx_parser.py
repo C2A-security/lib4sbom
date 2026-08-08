@@ -20,6 +20,11 @@ from lib4sbom.sbom import ParserType
 
 
 class SPDXParser:
+    # SPDX 2.2 has no validUntilDate package field, so SPDXGenerator carries
+    # the value in a package annotation under this key. Keep in sync with
+    # SPDXGenerator.EOL_ANNOTATION_KEY.
+    EOL_ANNOTATION_KEY = "c2a:end_of_life"
+
     def __init__(self):
         # Vulnerabilities not in SPDX
         self.vulnerabilities = []
@@ -120,6 +125,28 @@ class SPDXParser:
     def _validate_license(self, license_id):
         # correct licence ids, supporting both single ids and expressions (e.g. "MIT OR Apache-2.0")
         return self.license_scanner.find_license(license_id)
+
+    def _valid_until_from_comment(self, comment):
+        """Extract a validUntilDate carried in an annotation comment."""
+        if not isinstance(comment, str):
+            return None
+        # Tag format wraps free text in <text> markers
+        comment = comment.strip().removeprefix("<text>").removesuffix("</text>")
+        prefix = f"{self.EOL_ANNOTATION_KEY}="
+        if not comment.startswith(prefix):
+            return None
+        date = comment[len(prefix) :].strip()
+        return date if date else None
+
+    def _valid_until_from_annotations(self, annotations):
+        """Extract a validUntilDate from a list of package annotations."""
+        for annotation in annotations:
+            if not isinstance(annotation, dict):
+                continue
+            date = self._valid_until_from_comment(annotation.get("comment"))
+            if date is not None:
+                return date
+        return None
 
     def parse_spdx_tag(self, lines: list[str]):
         """parses SPDX tag value file extracting all SBOM data"""
@@ -356,6 +383,13 @@ class SPDXParser:
             elif line_elements[0] == "ValidUntilDate":
                 date = line_elements[1].strip().rstrip("\n")
                 spdx_package.set_value("validUntilDate", date)
+            elif line_elements[0] == "AnnotationComment":
+                # SPDX 2.2 has no ValidUntilDate tag; recover the value our
+                # generator stored in a package annotation
+                comment = line[len("AnnotationComment:") :].rstrip("\n")
+                date = self._valid_until_from_comment(comment)
+                if date is not None:
+                    spdx_package.set_value("validUntilDate", date)
             elif line_elements[0] == "ExternalRef":
                 # Format is TAG CATEGORY TYPE LOCATOR
                 # Need all data after type which may contain ':'
@@ -588,6 +622,14 @@ class SPDXParser:
                             spdx_package.set_value("release_date", d["releaseDate"])
                         if "validUntilDate" in d:
                             spdx_package.set_value("validUntilDate", d["validUntilDate"])
+                        elif "annotations" in d:
+                            # SPDX 2.2 has no validUntilDate field; recover the
+                            # value our generator stored in an annotation
+                            valid_until = self._valid_until_from_annotations(
+                                d["annotations"]
+                            )
+                            if valid_until is not None:
+                                spdx_package.set_value("validUntilDate", valid_until)
                         if "externalRefs" in d:
                             for ext_ref in d["externalRefs"]:
                                 ref_type = ext_ref["referenceType"]
