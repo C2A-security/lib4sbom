@@ -42,6 +42,11 @@ class SPDXGenerator:
     PACKAGE_PREAMBLE = f"{SPDX_PREAMBLE}Package-"
     FILE_PREAMBLE = f"{SPDX_PREAMBLE}File-"
     LICENSE_PREAMBLE = "LicenseRef-"
+    # validUntilDate was introduced in SPDX 2.3. Rather than drop the value
+    # when generating 2.2, carry it in a package annotation - the only place
+    # 2.2 allows arbitrary per-package metadata. Keep in sync with
+    # SPDXParser.EOL_ANNOTATION_KEY.
+    EOL_ANNOTATION_KEY = "c2a:end_of_life"
 
     def __init__(
         self,
@@ -122,6 +127,15 @@ class SPDXGenerator:
         if purpose not in self.PACKAGE_PURPOSES:
             purpose = "OTHER"
         return purpose
+
+    def _annotator(self):
+        # Same identity as the document creator
+        if self.metadata.get("Tool") is None:
+            return "Tool: " + self.application + "-" + self.application_version
+        return "Tool: " + self.metadata.get("Tool")
+
+    def _eol_annotation_comment(self, valid_until_date):
+        return f"{self.EOL_ANNOTATION_KEY}={valid_until_date}"
 
     def _uuid(self, id=None):
         if id is None:
@@ -456,6 +470,18 @@ class SPDXGenerator:
                 self.generateTag("BuiltDate", package_info["build_date"])
             if "validUntilDate" in package_info:
                 self.generateTag("ValidUntilDate", package_info["validUntilDate"])
+        elif package_info.get("validUntilDate"):
+            # No ValidUntilDate tag in SPDX 2.2 - carry it in an annotation
+            self.generateTag("Annotator", self._annotator())
+            self.generateTag("AnnotationDate", self.generateTime())
+            self.generateTag("AnnotationType", "OTHER")
+            self.generateTag("SPDXREF", package_id)
+            self.generateTag(
+                "AnnotationComment",
+                self._text(
+                    self._eol_annotation_comment(package_info["validUntilDate"])
+                ),
+            )
         if "externalreference" in package_info:
             # Potentially multiple entries
             for reference in package_info["externalreference"]:
@@ -621,6 +647,18 @@ class SPDXGenerator:
             if "validUntilDate" in package_info:
                 if len(package_info["validUntilDate"]) > 0:
                     component["validUntilDate"] = package_info["validUntilDate"]
+        elif package_info.get("validUntilDate"):
+            # No validUntilDate field in SPDX 2.2 - carry it in an annotation
+            component.setdefault("annotations", []).append(
+                {
+                    "annotationDate": self.generateTime(),
+                    "annotationType": "OTHER",
+                    "annotator": self._annotator(),
+                    "comment": self._eol_annotation_comment(
+                        package_info["validUntilDate"]
+                    ),
+                }
+            )
         if "externalreference" in package_info:
             # Potentially multiple entries
             for reference in package_info["externalreference"]:
