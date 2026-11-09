@@ -125,7 +125,7 @@ class CycloneDXParser:
                         if "properties" in dataset["contents"]:
                             for property in dataset["contents"]["properties"]:
                                 dataset_info.set_content_property(
-                                    property["name"], property["value"]
+                                    property["name"], property.get("value", "")
                                 )
                     dataset_info.set_classification(dataset["classification"])
                     if "sensitiveData" in dataset:
@@ -236,7 +236,9 @@ class CycloneDXParser:
         if "properties" in d["modelCard"]:
             # Potentially multiple entries
             for property in d["modelCard"]["properties"]:
-                self.model_card.set_property(property["name"], property["value"])
+                self.model_card.set_property(
+                    property["name"], property.get("value", "")
+                )
 
     def _cyclonedx_crypto(self, d):
         # Process crypto asset
@@ -597,19 +599,19 @@ class CycloneDXParser:
                 for property in d["properties"]:
                     if property["name"] == "release_date":
                         self.cyclonedx_package.set_value(
-                            "release_date", property["value"]
+                            "release_date", property.get("value", "")
                         )
                     elif property["name"] == "build_date":
                         self.cyclonedx_package.set_value(
-                            "build_date", property["value"]
+                            "build_date", property.get("value", "")
                         )
                     elif property["name"] == "c2a:end_of_life":
                         self.cyclonedx_package.set_value(
-                            "validUntilDate", property["value"]
+                            "validUntilDate", property.get("value", "")
                         )
                     else:
                         self.cyclonedx_package.set_property(
-                            property["name"], property["value"]
+                            property["name"], property.get("value", "")
                         )
             if "tags" in d:
                 # Potentially multiple entries
@@ -906,7 +908,7 @@ class CycloneDXParser:
                         if "properties" in service:
                             for property in service["properties"]:
                                 service_info.set_property(
-                                    property["name"], property["value"]
+                                    property["name"], property.get("value", "")
                                 )
                         if "externalreference" in service:
                             for reference in service["externalreference"]:
