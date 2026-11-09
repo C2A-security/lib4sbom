@@ -96,7 +96,7 @@ class CycloneDXParser:
         if "modelParameters" in d["modelCard"]:
             if "approach" in d["modelCard"]["modelParameters"]:
                 self.model_card.set_model_type(
-                    d["modelCard"]["modelParameters"]["approach"]["type"]
+                    d["modelCard"]["modelParameters"]["approach"].get("type", "")
                 )
             if "task" in d["modelCard"]["modelParameters"]:
                 self.model_card.set_task(d["modelCard"]["modelParameters"]["task"])
@@ -111,8 +111,8 @@ class CycloneDXParser:
             if "datasets" in d["modelCard"]["modelParameters"]:
                 for dataset in d["modelCard"]["modelParameters"]["datasets"]:
                     dataset_info = ModelDataset()
-                    dataset_info.set_dataset_type(dataset["type"])
-                    dataset_info.set_name(dataset["name"])
+                    dataset_info.set_dataset_type(dataset.get("type", ""))
+                    dataset_info.set_name(dataset.get("name", ""))
                     dataset_info.set_id(dataset.get("bom-ref"))
                     # Contents
                     if "contents" in dataset:
@@ -125,17 +125,21 @@ class CycloneDXParser:
                         if "properties" in dataset["contents"]:
                             for property in dataset["contents"]["properties"]:
                                 dataset_info.set_content_property(
-                                    property["name"], property["value"]
+                                    property["name"], property.get("value", "")
                                 )
-                    dataset_info.set_classification(dataset["classification"])
+                    if "classification" in dataset:
+                        dataset_info.set_classification(dataset["classification"])
                     if "sensitiveData" in dataset:
                         dataset_info.set_sensitive_data(dataset["sensitiveData"])
                     # Graphics
                     if "graphics" in dataset:
                         graphicset = ModelGraphicset()
-                        graphicset.set_description(dataset["graphics"]["description"])
-                        for graphic in dataset["graphics"]["collection"]:
-                            image = graphic["image"]
+                        if "description" in dataset["graphics"]:
+                            graphicset.set_description(
+                                dataset["graphics"]["description"]
+                            )
+                        for graphic in dataset["graphics"].get("collection", []):
+                            image = graphic.get("image", {})
                             graphicset.add_image(
                                 graphic.get("name"), image.get("content")
                             )
@@ -162,10 +166,10 @@ class CycloneDXParser:
                     self.model_card.set_dataset(dataset_info.get_dataset())
             if "inputs" in d["modelCard"]["modelParameters"]:
                 for inputs in d["modelCard"]["modelParameters"]["inputs"]:
-                    self.model_card.set_inputs(inputs["format"])
+                    self.model_card.set_inputs(inputs.get("format", ""))
             if "outputs" in d["modelCard"]["modelParameters"]:
                 for outputs in d["modelCard"]["modelParameters"]["outputs"]:
-                    self.model_card.set_outputs(outputs["format"])
+                    self.model_card.set_outputs(outputs.get("format", ""))
         if "quantitativeAnalysis" in d["modelCard"]:
             if "performanceMetrics" in d["modelCard"]["quantitativeAnalysis"]:
                 for metric in d["modelCard"]["quantitativeAnalysis"][
@@ -195,7 +199,7 @@ class CycloneDXParser:
                     for graphic in d["modelCard"]["quantitativeAnalysis"]["graphics"][
                         "collection"
                     ]:
-                        image = graphic["image"]
+                        image = graphic.get("image", {})
                         graphicset.add_image(graphic.get("name"), image.get("content"))
                 self.model_card.set_graphics(graphicset.get_graphicset())
         if "considerations" in d["modelCard"]:
@@ -228,15 +232,17 @@ class CycloneDXParser:
                     "fairnessAssessments"
                 ]:
                     self.model_card.set_fairness(
-                        assessment["groupAtRisk"],
-                        assessment["benefits"],
-                        assessment["harms"],
-                        assessment["mitigationStrategy"],
+                        assessment.get("groupAtRisk", ""),
+                        assessment.get("benefits", ""),
+                        assessment.get("harms", ""),
+                        assessment.get("mitigationStrategy", ""),
                     )
         if "properties" in d["modelCard"]:
             # Potentially multiple entries
             for property in d["modelCard"]["properties"]:
-                self.model_card.set_property(property["name"], property["value"])
+                self.model_card.set_property(
+                    property["name"], property.get("value", "")
+                )
 
     def _cyclonedx_crypto(self, d):
         # Process crypto asset
@@ -291,7 +297,9 @@ class CycloneDXParser:
                         keymap.append(date_event)
                 if "relatedCryptographicAssets" in certificate_properties:
                     for asset in certificate_properties["relatedCryptographicAssets"]:
-                        self.crypto.set_asset(asset["type"], asset["ref"])
+                        self.crypto.set_asset(
+                            asset.get("type", ""), asset.get("ref", "")
+                        )
                     keymap.append("relatedCryptographicAssets")
                 for key, value in certificate_properties.items():
                     if key not in keymap:
@@ -307,7 +315,9 @@ class CycloneDXParser:
                     keymap.append("version")
                 if "relatedCryptographicAssets" in protocol_properties:
                     for asset in protocol_properties["relatedCryptographicAssets"]:
-                        self.crypto.set_asset(asset["type"], asset["ref"])
+                        self.crypto.set_asset(
+                            asset.get("type", ""), asset.get("ref", "")
+                        )
                     keymap.append("relatedCryptographicAssets")
                 for key, value in protocol_properties.items():
                     if key not in keymap:
@@ -345,7 +355,9 @@ class CycloneDXParser:
                         keymap.append(date_event)
                 if "relatedCryptographicAssets" in material_properties:
                     for asset in material_properties["relatedCryptographicAssets"]:
-                        self.crypto.set_asset(asset["type"], asset["ref"])
+                        self.crypto.set_asset(
+                            asset.get("type", ""), asset.get("ref", "")
+                        )
                     keymap.append("relatedCryptographicAssets")
                 for key, value in material_properties.items():
                     if key not in keymap:
@@ -597,19 +609,19 @@ class CycloneDXParser:
                 for property in d["properties"]:
                     if property["name"] == "release_date":
                         self.cyclonedx_package.set_value(
-                            "release_date", property["value"]
+                            "release_date", property.get("value", "")
                         )
                     elif property["name"] == "build_date":
                         self.cyclonedx_package.set_value(
-                            "build_date", property["value"]
+                            "build_date", property.get("value", "")
                         )
                     elif property["name"] == "c2a:end_of_life":
                         self.cyclonedx_package.set_value(
-                            "validUntilDate", property["value"]
+                            "validUntilDate", property.get("value", "")
                         )
                     else:
                         self.cyclonedx_package.set_property(
-                            property["name"], property["value"]
+                            property["name"], property.get("value", "")
                         )
             if "tags" in d:
                 # Potentially multiple entries
@@ -683,41 +695,24 @@ class CycloneDXParser:
                                     "lifecycle", lifecycle["phase"]
                                 )
                     if "tools" in data["metadata"]:
-                        if self._cyclonedx_15():
-                            if "components" in data["metadata"]["tools"]:
-                                for component in data["metadata"]["tools"][
-                                    "components"
-                                ]:
-                                    name = component["name"]
-                                    if "version" in component:
-                                        name = f'{name}#{component["version"]}'
-                                    cyclonedx_document.set_creator("tool", name)
-                            else:
-                                # This is the legacy interface which is deprecated.
-                                if self.debug:
-                                    print(
-                                        "Legacy tool(s) specification still being used."
-                                    )
-                                if "components" in data["metadata"]["tools"][0]:
-                                    name = ""
-                                    if (
-                                        "name"
-                                        in data["metadata"]["tools"][0]["components"][0]
-                                    ):
-                                        name = data["metadata"]["tools"][0][
-                                            "components"
-                                        ][0]["name"]
-                                    if (
-                                        "version"
-                                        in data["metadata"]["tools"][0]["components"][0]
-                                    ):
-                                        name = f'{name}#{data["metadata"]["tools"][0]["components"][0]["version"]}'
-                                    cyclonedx_document.set_creator("tool", name)
+                        tools = data["metadata"]["tools"]
+                        if isinstance(tools, dict):
+                            # CycloneDX 1.5+ form: components and/or services
+                            tool_entries = tools.get("components", []) + tools.get(
+                                "services", []
+                            )
                         else:
-                            name = data["metadata"]["tools"][0]["name"]
-                            if "version" in data["metadata"]["tools"]:
-                                name = f'{name}#{data["metadata"]["tools"][0]["name"]}'
-                            cyclonedx_document.set_creator("tool", name)
+                            # Legacy array of tool objects (deprecated in 1.5).
+                            # None of a tool's fields are mandatory.
+                            if self.debug and len(tools) > 0:
+                                print("Legacy tool(s) specification still being used.")
+                            tool_entries = tools
+                        for tool in tool_entries:
+                            name = tool.get("name", "")
+                            if "version" in tool:
+                                name = f'{name}#{tool["version"]}'
+                            if len(name) > 0:
+                                cyclonedx_document.set_creator("tool", name)
                     if "authors" in data["metadata"]:
                         for a in data["metadata"]["authors"]:
                             name = f'{a.get("name","")}#{a.get("email","")}'
@@ -741,9 +736,22 @@ class CycloneDXParser:
                             )
                         if "supplier" in data["metadata"]["component"]:
                             supplier = data["metadata"]["component"]["supplier"]
-                            cyclonedx_document.set_value(
-                                "metadata_supplier", supplier["name"]
-                            )
+                            supplier_name = ""
+                            if "name" in supplier:
+                                supplier_name = supplier["name"]
+                            elif "url" in supplier:
+                                for u in supplier["url"]:
+                                    supplier_name = u
+                            if "contact" in supplier:
+                                for contact in supplier["contact"]:
+                                    if "email" in contact:
+                                        supplier_name = (
+                                            f'{supplier_name} ({contact["email"]})'
+                                        )
+                            if len(supplier_name) > 0:
+                                cyclonedx_document.set_value(
+                                    "metadata_supplier", supplier_name
+                                )
                     if "properties" in data["metadata"]:
                         cyclonedx_document.set_value(
                             "property", data["metadata"]["properties"]
@@ -906,7 +914,7 @@ class CycloneDXParser:
                         if "properties" in service:
                             for property in service["properties"]:
                                 service_info.set_property(
-                                    property["name"], property["value"]
+                                    property["name"], property.get("value", "")
                                 )
                         if "externalreference" in service:
                             for reference in service["externalreference"]:
